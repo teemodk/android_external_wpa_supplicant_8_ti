@@ -55,7 +55,6 @@ static void ieee80211_tkip_countermeasures_start(struct hostapd_data *hapd)
 		}
 		hostapd_drv_sta_deauth(hapd, sta->addr,
 				       WLAN_REASON_MICHAEL_MIC_FAILURE);
-		ap_sta_cancel_priority(hapd, sta);
 		ap_free_sta(hapd, sta);
 	}
 }
@@ -67,9 +66,10 @@ void ieee80211_tkip_countermeasures_deinit(struct hostapd_data *hapd)
 }
 
 
-void michael_mic_failure(struct hostapd_data *hapd, const u8 *addr, int local)
+int michael_mic_failure(struct hostapd_data *hapd, const u8 *addr, int local)
 {
 	struct os_time now;
+	int ret = 0;
 
 	if (addr && local) {
 		struct sta_info *sta = ap_get_sta(hapd, addr);
@@ -85,7 +85,7 @@ void michael_mic_failure(struct hostapd_data *hapd, const u8 *addr, int local)
 				   "MLME-MICHAELMICFAILURE.indication "
 				   "for not associated STA (" MACSTR
 				   ") ignored", MAC2STR(addr));
-			return;
+			return ret;
 		}
 	}
 
@@ -94,8 +94,12 @@ void michael_mic_failure(struct hostapd_data *hapd, const u8 *addr, int local)
 		hapd->michael_mic_failures = 1;
 	} else {
 		hapd->michael_mic_failures++;
-		if (hapd->michael_mic_failures > 1)
+		if (hapd->michael_mic_failures > 1) {
 			ieee80211_tkip_countermeasures_start(hapd);
+			ret = 1;
+		}
 	}
 	hapd->michael_mic_failure = now.sec;
+
+	return ret;
 }

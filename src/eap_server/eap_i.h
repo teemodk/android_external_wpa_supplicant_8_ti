@@ -151,7 +151,7 @@ struct eap_sm {
 	int user_eap_method_index;
 	int init_phase2;
 	void *ssl_ctx;
-	void *eap_sim_db_priv;
+	struct eap_sim_db_data *eap_sim_db_priv;
 	Boolean backend_auth;
 	Boolean update_user;
 	int eap_server;
@@ -188,6 +188,9 @@ struct eap_sm {
 	int fragment_size;
 
 	int pbc_in_m1;
+
+	const u8 *server_id;
+	size_t server_id_len;
 };
 
 int eap_user_get(struct eap_sm *sm, const u8 *identity, size_t identity_len,

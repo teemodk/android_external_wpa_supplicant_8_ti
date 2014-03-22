@@ -134,22 +134,23 @@ static inline int wpa_drv_set_key(struct wpa_supplicant *wpa_s,
 	return -1;
 }
 
+static inline int wpa_drv_sta_deauth(struct wpa_supplicant *wpa_s,
+				     const u8 *addr, int reason_code)
+{
+	if (wpa_s->driver->sta_deauth) {
+		return wpa_s->driver->sta_deauth(wpa_s->drv_priv,
+						 wpa_s->own_addr, addr,
+						 reason_code);
+	}
+	return -1;
+}
+
 static inline int wpa_drv_deauthenticate(struct wpa_supplicant *wpa_s,
 					 const u8 *addr, int reason_code)
 {
 	if (wpa_s->driver->deauthenticate) {
 		return wpa_s->driver->deauthenticate(wpa_s->drv_priv, addr,
 						     reason_code);
-	}
-	return -1;
-}
-
-static inline int wpa_drv_disassociate(struct wpa_supplicant *wpa_s,
-				       const u8 *addr, int reason_code)
-{
-	if (wpa_s->driver->disassociate) {
-		return wpa_s->driver->disassociate(wpa_s->drv_priv, addr,
-						   reason_code);
 	}
 	return -1;
 }
@@ -416,22 +417,6 @@ static inline int wpa_drv_cancel_remain_on_channel(
 	return -1;
 }
 
-static inline int wpa_drv_set_priority(
-	struct wpa_supplicant *wpa_s)
-{
-	if (wpa_s->driver->set_priority)
-		return wpa_s->driver->set_priority(wpa_s->drv_priv);
-	return -1;
-}
-
-static inline int wpa_drv_cancel_priority(
-	struct wpa_supplicant *wpa_s)
-{
-	if (wpa_s->driver->cancel_priority)
-		return wpa_s->driver->cancel_priority(wpa_s->drv_priv);
-	return -1;
-}
-
 static inline int wpa_drv_probe_req_report(struct wpa_supplicant *wpa_s,
 					   int report)
 {
@@ -481,6 +466,15 @@ static inline int wpa_drv_signal_poll(struct wpa_supplicant *wpa_s,
 {
 	if (wpa_s->driver->signal_poll)
 		return wpa_s->driver->signal_poll(wpa_s->drv_priv, si);
+	return -1;
+}
+
+static inline int wpa_drv_pktcnt_poll(struct wpa_supplicant *wpa_s,
+				      struct hostap_sta_driver_data *sta)
+{
+	if (wpa_s->driver->read_sta_data)
+		return wpa_s->driver->read_sta_data(wpa_s->drv_priv, sta,
+						    wpa_s->bssid);
 	return -1;
 }
 
@@ -676,6 +670,14 @@ static inline int wpa_drv_tdls_oper(struct wpa_supplicant *wpa_s,
 	return wpa_s->driver->tdls_oper(wpa_s->drv_priv, oper, peer);
 }
 
+static inline int wpa_drv_driver_cmd(struct wpa_supplicant *wpa_s,
+				     char *cmd, char *buf, size_t buf_len)
+{
+	if (!wpa_s->driver->driver_cmd)
+		return -1;
+	return wpa_s->driver->driver_cmd(wpa_s->drv_priv, cmd, buf, buf_len);
+}
+
 static inline void wpa_drv_set_rekey_info(struct wpa_supplicant *wpa_s,
 					  const u8 *kek, const u8 *kck,
 					  const u8 *replay_ctr)
@@ -701,12 +703,14 @@ static inline int wpa_drv_switch_channel(struct wpa_supplicant *wpa_s,
 	return wpa_s->driver->switch_channel(wpa_s->drv_priv, freq);
 }
 
-static inline int wpa_drv_driver_cmd(struct wpa_supplicant *wpa_s,
-				     char *cmd, char *buf, size_t buf_len)
+static inline int wpa_drv_wnm_oper(struct wpa_supplicant *wpa_s,
+				   enum wnm_oper oper, const u8 *peer,
+				   u8 *buf, u16 *buf_len)
 {
-	if (!wpa_s->driver->driver_cmd)
+	if (!wpa_s->driver->wnm_oper)
 		return -1;
-	return wpa_s->driver->driver_cmd(wpa_s->drv_priv, cmd, buf, buf_len);
+	return wpa_s->driver->wnm_oper(wpa_s->drv_priv, oper, peer, buf,
+				       buf_len);
 }
 
 #endif /* DRIVER_I_H */

@@ -153,8 +153,8 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 #ifdef CONFIG_ELOOP_POLL
 	if (new_max_sock >= eloop.max_pollfd_map) {
 		struct pollfd **nmap;
-		nmap = os_realloc(eloop.pollfds_map, sizeof(struct pollfd *) *
-				  (new_max_sock + 50));
+		nmap = os_realloc_array(eloop.pollfds_map, new_max_sock + 50,
+					sizeof(struct pollfd *));
 		if (nmap == NULL)
 			return -1;
 
@@ -165,7 +165,8 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 	if (eloop.count + 1 > eloop.max_poll_fds) {
 		struct pollfd *n;
 		int nmax = eloop.count + 1 + 50;
-		n = os_realloc(eloop.pollfds, sizeof(struct pollfd) * nmax);
+		n = os_realloc_array(eloop.pollfds, nmax,
+				     sizeof(struct pollfd));
 		if (n == NULL)
 			return -1;
 
@@ -175,9 +176,8 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 #endif /* CONFIG_ELOOP_POLL */
 
 	eloop_trace_sock_remove_ref(table);
-	tmp = (struct eloop_sock *)
-		os_realloc(table->table,
-			   (table->count + 1) * sizeof(struct eloop_sock));
+	tmp = os_realloc_array(table->table, table->count + 1,
+			       sizeof(struct eloop_sock));
 	if (tmp == NULL)
 		return -1;
 
@@ -556,6 +556,33 @@ int eloop_cancel_timeout(eloop_timeout_handler handler,
 }
 
 
+int eloop_cancel_timeout_one(eloop_timeout_handler handler,
+			     void *eloop_data, void *user_data,
+			     struct os_time *remaining)
+{
+	struct eloop_timeout *timeout, *prev;
+	int removed = 0;
+	struct os_time now;
+
+	os_get_time(&now);
+	remaining->sec = remaining->usec = 0;
+
+	dl_list_for_each_safe(timeout, prev, &eloop.timeout,
+			      struct eloop_timeout, list) {
+		if (timeout->handler == handler &&
+		    (timeout->eloop_data == eloop_data) &&
+		    (timeout->user_data == user_data)) {
+			removed = 1;
+			if (os_time_before(&now, &timeout->time))
+				os_time_sub(&timeout->time, &now, remaining);
+			eloop_remove_timeout(timeout);
+			break;
+		}
+	}
+	return removed;
+}
+
+
 int eloop_is_timeout_registered(eloop_timeout_handler handler,
 				void *eloop_data, void *user_data)
 {
@@ -639,10 +666,8 @@ int eloop_register_signal(int sig, eloop_signal_handler handler,
 {
 	struct eloop_signal *tmp;
 
-	tmp = (struct eloop_signal *)
-		os_realloc(eloop.signals,
-			   (eloop.signal_count + 1) *
-			   sizeof(struct eloop_signal));
+	tmp = os_realloc_array(eloop.signals, eloop.signal_count + 1,
+			       sizeof(struct eloop_signal));
 	if (tmp == NULL)
 		return -1;
 
@@ -774,6 +799,7 @@ void eloop_run(void)
 #endif /* CONFIG_ELOOP_POLL */
 	}
 
+	eloop.terminate = 0;
 out:
 #ifndef CONFIG_ELOOP_POLL
 	os_free(rfds);

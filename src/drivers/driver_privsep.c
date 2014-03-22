@@ -152,7 +152,7 @@ wpa_driver_privsep_get_scan_results2(void *priv)
 		return NULL;
 	}
 
-	results->res = os_zalloc(num * sizeof(struct wpa_scan_res *));
+	results->res = os_calloc(num, sizeof(struct wpa_scan_res *));
 	if (results->res == NULL) {
 		os_free(results);
 		os_free(buf);
@@ -295,17 +295,6 @@ static int wpa_driver_privsep_get_ssid(void *priv, u8 *ssid)
 
 static int wpa_driver_privsep_deauthenticate(void *priv, const u8 *addr,
 					  int reason_code)
-{
-	//struct wpa_driver_privsep_data *drv = priv;
-	wpa_printf(MSG_DEBUG, "%s addr=" MACSTR " reason_code=%d",
-		   __func__, MAC2STR(addr), reason_code);
-	wpa_printf(MSG_DEBUG, "%s - TODO", __func__);
-	return 0;
-}
-
-
-static int wpa_driver_privsep_disassociate(void *priv, const u8 *addr,
-					int reason_code)
 {
 	//struct wpa_driver_privsep_data *drv = priv;
 	wpa_printf(MSG_DEBUG, "%s addr=" MACSTR " reason_code=%d",
@@ -736,7 +725,6 @@ struct wpa_driver_ops wpa_driver_privsep_ops = {
 	.set_param = wpa_driver_privsep_set_param,
 	.scan2 = wpa_driver_privsep_scan,
 	.deauthenticate = wpa_driver_privsep_deauthenticate,
-	.disassociate = wpa_driver_privsep_disassociate,
 	.associate = wpa_driver_privsep_associate,
 	.get_capa = wpa_driver_privsep_get_capa,
 	.get_mac_addr = wpa_driver_privsep_get_mac_addr,

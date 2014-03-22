@@ -223,6 +223,11 @@ struct radius_server_data {
 	u16 pwd_group;
 
 	/**
+	 * server_id - Server identity
+	 */
+	const char *server_id;
+
+	/**
 	 * wps - Wi-Fi Protected Setup context
 	 *
 	 * If WPS is used with an external RADIUS server (which is quite
@@ -511,6 +516,8 @@ radius_server_get_new_session(struct radius_server_data *data,
 	eap_conf.tnc = data->tnc;
 	eap_conf.wps = data->wps;
 	eap_conf.pwd_group = data->pwd_group;
+	eap_conf.server_id = (const u8 *) data->server_id;
+	eap_conf.server_id_len = os_strlen(data->server_id);
 	sess->eap = eap_server_sm_init(sess, &radius_server_eapol_cb,
 				       &eap_conf);
 	if (sess->eap == NULL) {
@@ -689,8 +696,7 @@ static int radius_server_request(struct radius_server_data *data,
 				 const char *from_addr, int from_port,
 				 struct radius_session *force_sess)
 {
-	u8 *eap = NULL;
-	size_t eap_len;
+	struct wpabuf *eap = NULL;
 	int res, state_included = 0;
 	u8 statebuf[4];
 	unsigned int state;
@@ -754,7 +760,7 @@ static int radius_server_request(struct radius_server_data *data,
 		return -1;
 	}
 		      
-	eap = radius_msg_get_eap(msg, &eap_len);
+	eap = radius_msg_get_eap(msg);
 	if (eap == NULL) {
 		RADIUS_DEBUG("No EAP-Message in RADIUS packet from %s",
 			     from_addr);
@@ -763,7 +769,7 @@ static int radius_server_request(struct radius_server_data *data,
 		return -1;
 	}
 
-	RADIUS_DUMP("Received EAP data", eap, eap_len);
+	RADIUS_DUMP("Received EAP data", wpabuf_head(eap), wpabuf_len(eap));
 
 	/* FIX: if Code is Request, Success, or Failure, send Access-Reject;
 	 * RFC3579 Sect. 2.6.2.
@@ -773,10 +779,7 @@ static int radius_server_request(struct radius_server_data *data,
 	 * Or is this already done by the EAP state machine? */
 
 	wpabuf_free(sess->eap_if->eapRespData);
-	sess->eap_if->eapRespData = wpabuf_alloc_ext_data(eap, eap_len);
-	if (sess->eap_if->eapRespData == NULL)
-		os_free(eap);
-	eap = NULL;
+	sess->eap_if->eapRespData = eap;
 	sess->eap_if->eapResp = TRUE;
 	eap_server_sm_step(sess->eap);
 
@@ -1284,6 +1287,7 @@ radius_server_init(struct radius_server_conf *conf)
 	data->tnc = conf->tnc;
 	data->wps = conf->wps;
 	data->pwd_group = conf->pwd_group;
+	data->server_id = conf->server_id;
 	if (conf->eap_req_id_text) {
 		data->eap_req_id_text = os_malloc(conf->eap_req_id_text_len);
 		if (data->eap_req_id_text) {

@@ -1,6 +1,6 @@
 /*
  * WPA Supplicant / Network configuration structures
- * Copyright (c) 2003-2008, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2003-2013, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -10,6 +10,7 @@
 #define CONFIG_SSID_H
 
 #include "common/defs.h"
+#include "utils/list.h"
 #include "eap_peer/eap_config.h"
 
 #define MAX_SSID_LEN 32
@@ -28,9 +29,17 @@
 #define DEFAULT_BG_SCAN_PERIOD -1
 #define DEFAULT_DISABLE_HT 0
 #define DEFAULT_DISABLE_HT40 0
+#define DEFAULT_DISABLE_SGI 0
 #define DEFAULT_DISABLE_MAX_AMSDU -1 /* no change */
 #define DEFAULT_AMPDU_FACTOR -1 /* no change */
 #define DEFAULT_AMPDU_DENSITY -1 /* no change */
+
+struct psk_list_entry {
+	struct dl_list list;
+	u8 addr[ETH_ALEN];
+	u8 psk[32];
+	u8 p2p;
+};
 
 /**
  * struct wpa_ssid - Network configuration data
@@ -141,6 +150,14 @@ struct wpa_ssid {
 	char *passphrase;
 
 	/**
+	 * ext_psk - PSK/passphrase name in external storage
+	 *
+	 * If this is set, PSK/passphrase will be fetched from external storage
+	 * when requesting association with the network.
+	 */
+	char *ext_psk;
+
+	/**
 	 * pairwise_cipher - Bitfield of allowed pairwise ciphers, WPA_CIPHER_*
 	 */
 	int pairwise_cipher;
@@ -220,13 +237,18 @@ struct wpa_ssid {
 	 *
 	 * This field can be used to enable proactive key caching which is also
 	 * known as opportunistic PMKSA caching for WPA2. This is disabled (0)
-	 * by default. Enable by setting this to 1.
+	 * by default unless default value is changed with the global okc=1
+	 * parameter. Enable by setting this to 1.
 	 *
 	 * Proactive key caching is used to make supplicant assume that the APs
 	 * are using the same PMK and generate PMKSA cache entries without
 	 * doing RSN pre-authentication. This requires support from the AP side
 	 * and is normally used with wireless switches that co-locate the
 	 * authenticator.
+	 *
+	 * Internally, special value -1 is used to indicate that the parameter
+	 * was not specified in the configuration (i.e., default behavior is
+	 * followed).
 	 */
 	int proactive_key_caching;
 
@@ -315,6 +337,14 @@ struct wpa_ssid {
 	int disabled;
 
 	/**
+	 * disabled_for_connect - Whether this network was temporarily disabled
+	 *
+	 * This flag is used to reenable all the temporarily disabled networks
+	 * after either the success or failure of a WPS connection.
+	 */
+	int disabled_for_connect;
+
+	/**
 	 * peerkey -  Whether PeerKey handshake for direct links is allowed
 	 *
 	 * This is only used when both RSN/WPA2 and IEEE 802.11e (QoS) are
@@ -340,6 +370,12 @@ struct wpa_ssid {
 	 *
 	 * This value is used to configure policy for management frame
 	 * protection (IEEE 802.11w). 0 = disabled, 1 = optional, 2 = required.
+	 * This is disabled by default unless the default value has been changed
+	 * with the global pmf=1/2 parameter.
+	 *
+	 * Internally, special value 3 is used to indicate that the parameter
+	 * was not specified in the configuration (i.e., default behavior is
+	 * followed).
 	 */
 	enum mfp_options ieee80211w;
 #endif /* CONFIG_IEEE80211W */
@@ -423,6 +459,15 @@ struct wpa_ssid {
 	 */
 	size_t num_p2p_clients;
 
+#ifndef P2P_MAX_STORED_CLIENTS
+#define P2P_MAX_STORED_CLIENTS 100
+#endif /* P2P_MAX_STORED_CLIENTS */
+
+	/**
+	 * psk_list - Per-client PSKs (struct psk_list_entry)
+	 */
+	struct dl_list psk_list;
+
 	/**
 	 * p2p_group - Network generated as a P2P group (used internally)
 	 */
@@ -464,6 +509,14 @@ struct wpa_ssid {
 	int disable_ht40;
 
 	/**
+	 * disable_sgi - Disable SGI (Short Guard Interval) for this network
+	 *
+	 * By default, use it if it is available, but this can be configured
+	 * to 1 to have it disabled.
+	 */
+	int disable_sgi;
+
+	/**
 	 * disable_max_amsdu - Disable MAX A-MSDU
 	 *
 	 * A-MDSU will be 3839 bytes when disabled, or 7935
@@ -494,6 +547,35 @@ struct wpa_ssid {
 	char *ht_mcs;
 #endif /* CONFIG_HT_OVERRIDES */
 
+#ifdef CONFIG_VHT_OVERRIDES
+	/**
+	 * disable_vht - Disable VHT (IEEE 802.11ac) for this network
+	 *
+	 * By default, use it if it is available, but this can be configured
+	 * to 1 to have it disabled.
+	 */
+	int disable_vht;
+
+	/**
+	 * vht_capa - VHT capabilities to use
+	 */
+	unsigned int vht_capa;
+
+	/**
+	 * vht_capa_mask - mask for VHT capabilities
+	 */
+	unsigned int vht_capa_mask;
+
+	int vht_rx_mcs_nss_1, vht_rx_mcs_nss_2,
+	    vht_rx_mcs_nss_3, vht_rx_mcs_nss_4,
+	    vht_rx_mcs_nss_5, vht_rx_mcs_nss_6,
+	    vht_rx_mcs_nss_7, vht_rx_mcs_nss_8;
+	int vht_tx_mcs_nss_1, vht_tx_mcs_nss_2,
+	    vht_tx_mcs_nss_3, vht_tx_mcs_nss_4,
+	    vht_tx_mcs_nss_5, vht_tx_mcs_nss_6,
+	    vht_tx_mcs_nss_7, vht_tx_mcs_nss_8;
+#endif /* CONFIG_VHT_OVERRIDES */
+
 	/**
 	 * ap_max_inactivity - Timeout in seconds to detect STA's inactivity
 	 *
@@ -507,6 +589,30 @@ struct wpa_ssid {
 	 * By default: 2
 	 */
 	int dtim_period;
+
+	/**
+	 * beacon_int - Beacon interval (default: 100 TU)
+	 */
+	int beacon_int;
+
+	/**
+	 * auth_failures - Number of consecutive authentication failures
+	 */
+	unsigned int auth_failures;
+
+	/**
+	 * disabled_until - Network block disabled until this time if non-zero
+	 */
+	struct os_time disabled_until;
+
+	/**
+	 * parent_cred - Pointer to parent wpa_cred entry
+	 *
+	 * This pointer can be used to delete temporary networks when a wpa_cred
+	 * that was used to create them is removed. This pointer should not be
+	 * dereferences since it may not be updated in all cases.
+	 */
+	void *parent_cred;
 
 	/**
 	 * sched_scanned - ssid was scanned in the latest sched scan

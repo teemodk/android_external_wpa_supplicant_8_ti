@@ -24,6 +24,7 @@
 #include "hostapd.h"
 #include "ap_config.h"
 #include "ap_drv_ops.h"
+#include "acs.h"
 #include "hw_features.h"
 
 
@@ -122,6 +123,8 @@ int hostapd_prepare_rates(struct hostapd_iface *iface,
 	case HOSTAPD_MODE_IEEE80211G:
 		basic_rates = basic_rates_g;
 		break;
+	case HOSTAPD_MODE_IEEE80211AD:
+		return 0; /* No basic rates for 11ad */
 	default:
 		return -1;
 	}
@@ -140,7 +143,7 @@ int hostapd_prepare_rates(struct hostapd_iface *iface,
 	iface->num_rates = 0;
 
 	iface->current_rates =
-		os_zalloc(mode->num_rates * sizeof(struct hostapd_rate_data));
+		os_calloc(mode->num_rates, sizeof(struct hostapd_rate_data));
 	if (!iface->current_rates) {
 		wpa_printf(MSG_ERROR, "Failed to allocate memory for rate "
 			   "table.");
@@ -441,7 +444,6 @@ static void ieee80211n_check_scan(struct hostapd_iface *iface)
 			   iface->conf->channel +
 			   iface->conf->secondary_channel * 4);
 		iface->conf->secondary_channel = 0;
-		iface->conf->ht_capab &= ~HT_CAP_INFO_SUPP_CHANNEL_WIDTH_SET;
 	}
 
 	res = ieee80211n_allowed_ht40_channel_pair(iface);
@@ -472,7 +474,7 @@ static void ieee80211n_scan_channels_2g4(struct hostapd_iface *iface,
 		   affected_start, affected_end);
 
 	mode = iface->current_mode;
-	params->freqs = os_zalloc((mode->num_channels + 1) * sizeof(int));
+	params->freqs = os_calloc(mode->num_channels + 1, sizeof(int));
 	if (params->freqs == NULL)
 		return;
 	pos = 0;
@@ -633,6 +635,132 @@ int hostapd_check_ht_capab(struct hostapd_iface *iface)
 }
 
 
+static int hostapd_is_usable_chan(struct hostapd_iface *iface,
+				  int channel, int primary)
+{
+	int i;
+	struct hostapd_channel_data *chan;
+
+	for (i = 0; i < iface->current_mode->num_channels; i++) {
+		chan = &iface->current_mode->channels[i];
+		if (chan->chan != channel)
+			continue;
+
+		if (!(chan->flag & HOSTAPD_CHAN_DISABLED))
+			return 1;
+
+		wpa_printf(MSG_DEBUG,
+			   "%schannel [%i] (%i) is disabled for use in AP mode, flags: 0x%x%s%s%s",
+			   primary ? "" : "Configured HT40 secondary ",
+			   i, chan->chan, chan->flag,
+			   chan->flag & HOSTAPD_CHAN_NO_IBSS ? " NO-IBSS" : "",
+			   chan->flag & HOSTAPD_CHAN_PASSIVE_SCAN ?
+			   " PASSIVE-SCAN" : "",
+			   chan->flag & HOSTAPD_CHAN_RADAR ? " RADAR" : "");
+	}
+
+	return 0;
+}
+
+
+static int hostapd_is_usable_chans(struct hostapd_iface *iface)
+{
+	if (!hostapd_is_usable_chan(iface, iface->conf->channel, 1))
+		return 0;
+
+	if (!iface->conf->secondary_channel)
+		return 1;
+
+	return hostapd_is_usable_chan(iface, iface->conf->channel +
+				      iface->conf->secondary_channel * 4, 0);
+}
+
+
+static enum hostapd_chan_status
+hostapd_check_chans(struct hostapd_iface *iface)
+{
+	if (iface->conf->channel) {
+		if (hostapd_is_usable_chans(iface))
+			return HOSTAPD_CHAN_VALID;
+		else
+			return HOSTAPD_CHAN_INVALID;
+	}
+
+	/*
+	 * The user set channel=0 or channel=acs_survey
+	 * which is used to trigger ACS.
+	 */
+
+	switch (acs_init(iface)) {
+	case HOSTAPD_CHAN_ACS:
+		return HOSTAPD_CHAN_ACS;
+	case HOSTAPD_CHAN_VALID:
+	case HOSTAPD_CHAN_INVALID:
+	default:
+		return HOSTAPD_CHAN_INVALID;
+	}
+}
+
+
+static void hostapd_notify_bad_chans(struct hostapd_iface *iface)
+{
+	hostapd_logger(iface->bss[0], NULL,
+		       HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_WARNING,
+		       "Configured channel (%d) not found from the "
+		       "channel list of current mode (%d) %s",
+		       iface->conf->channel,
+		       iface->current_mode->mode,
+		       hostapd_hw_mode_txt(iface->current_mode->mode));
+	hostapd_logger(iface->bss[0], NULL, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_WARNING,
+		       "Hardware does not support configured channel");
+}
+
+
+int hostapd_acs_completed(struct hostapd_iface *iface)
+{
+	int ret;
+
+	switch (hostapd_check_chans(iface)) {
+	case HOSTAPD_CHAN_VALID:
+		break;
+	case HOSTAPD_CHAN_ACS:
+		wpa_printf(MSG_ERROR, "ACS error - reported complete, but no result available");
+		hostapd_notify_bad_chans(iface);
+		return -1;
+	case HOSTAPD_CHAN_INVALID:
+	default:
+		wpa_printf(MSG_ERROR, "ACS picked unusable channels");
+		hostapd_notify_bad_chans(iface);
+		return -1;
+	}
+
+	ret = hostapd_check_ht_capab(iface);
+	if (ret < 0)
+		return -1;
+	if (ret == 1) {
+		wpa_printf(MSG_DEBUG, "Interface initialization will be completed in a callback");
+		return 0;
+	}
+
+	return hostapd_setup_interface_complete(iface, 0);
+}
+
+
+static u8 freq_to_channel(int freq)
+{
+	if (freq >= 2412 && freq <= 2472)
+		return (freq - 2407) / 5;
+	else if (freq == 2484)
+		return 14;
+	else if (freq >= 5180 && freq <= 5805)
+		return (freq - 5000) / 5;
+
+	return 0;
+}
+
+
 /**
  * hostapd_select_hw_mode - Select the hardware mode
  * @iface: Pointer to interface data.
@@ -643,7 +771,8 @@ int hostapd_check_ht_capab(struct hostapd_iface *iface)
  */
 int hostapd_select_hw_mode(struct hostapd_iface *iface)
 {
-	int i, j, ok;
+	int i;
+	struct wpa_channel_info info;
 
 	if (iface->num_hw_features < 1)
 		return -1;
@@ -668,79 +797,31 @@ int hostapd_select_hw_mode(struct hostapd_iface *iface)
 		return -2;
 	}
 
-	ok = 0;
-	for (j = 0; j < iface->current_mode->num_channels; j++) {
-		struct hostapd_channel_data *chan =
-			&iface->current_mode->channels[j];
-		if (chan->chan == iface->conf->channel) {
-			if (chan->flag & HOSTAPD_CHAN_DISABLED) {
-				wpa_printf(MSG_ERROR,
-					   "channel [%i] (%i) is disabled for "
-					   "use in AP mode, flags: 0x%x%s%s%s",
-					   j, chan->chan, chan->flag,
-					   chan->flag & HOSTAPD_CHAN_NO_IBSS ?
-					   " NO-IBSS" : "",
-					   chan->flag &
-					   HOSTAPD_CHAN_PASSIVE_SCAN ?
-					   " PASSIVE-SCAN" : "",
-					   chan->flag & HOSTAPD_CHAN_RADAR ?
-					   " RADAR" : "");
-			} else {
-				ok = 1;
-				break;
-			}
+	/* if we failed in querying the channel, assume no concurrent operation */
+	if (iface->conf->ap_channel_sync &&
+	    hostapd_drv_shared_ap_freq(iface->bss[0], &info) == 1) {
+		u8 chan = freq_to_channel(info.frequency);
+		if (chan == 0) {
+			wpa_printf(MSG_ERROR, "Shared AP freq bad channel");
+			return -3;
 		}
-	}
-	if (ok && iface->conf->secondary_channel) {
-		int sec_ok = 0;
-		int sec_chan = iface->conf->channel +
-			iface->conf->secondary_channel * 4;
-		for (j = 0; j < iface->current_mode->num_channels; j++) {
-			struct hostapd_channel_data *chan =
-				&iface->current_mode->channels[j];
-			if (!(chan->flag & HOSTAPD_CHAN_DISABLED) &&
-			    (chan->chan == sec_chan)) {
-				sec_ok = 1;
-				break;
-			}
-		}
-		if (!sec_ok) {
-			hostapd_logger(iface->bss[0], NULL,
-				       HOSTAPD_MODULE_IEEE80211,
-				       HOSTAPD_LEVEL_WARNING,
-				       "Configured HT40 secondary channel "
-				       "(%d) not found from the channel list "
-				       "of current mode (%d) %s",
-				       sec_chan, iface->current_mode->mode,
-				       hostapd_hw_mode_txt(
-					       iface->current_mode->mode));
-			ok = 0;
-		}
-	}
-	if (iface->conf->channel == 0) {
-		/* TODO: could request a scan of neighboring BSSes and select
-		 * the channel automatically */
-		wpa_printf(MSG_ERROR, "Channel not configured "
-			   "(hw_mode/channel in hostapd.conf)");
-		return -3;
-	}
-	if (ok == 0 && iface->conf->channel != 0) {
-		hostapd_logger(iface->bss[0], NULL,
-			       HOSTAPD_MODULE_IEEE80211,
-			       HOSTAPD_LEVEL_WARNING,
-			       "Configured channel (%d) not found from the "
-			       "channel list of current mode (%d) %s",
-			       iface->conf->channel,
-			       iface->current_mode->mode,
-			       hostapd_hw_mode_txt(iface->current_mode->mode));
-		iface->current_mode = NULL;
+
+		iface->conf->channel = chan;
+		iface->conf->secondary_channel = info.sec_channel_offset;
+		wpa_printf(MSG_DEBUG, "Channel automatically synced to "
+			   "existing AP: %d (secondary: %d)",
+			   chan, info.sec_channel_offset);
 	}
 
-	if (iface->current_mode == NULL) {
-		hostapd_logger(iface->bss[0], NULL, HOSTAPD_MODULE_IEEE80211,
-			       HOSTAPD_LEVEL_WARNING,
-			       "Hardware does not support configured channel");
-		return -4;
+	switch (hostapd_check_chans(iface)) {
+	case HOSTAPD_CHAN_VALID:
+		return 0;
+	case HOSTAPD_CHAN_ACS: /* ACS will run and later complete */
+		return 1;
+	case HOSTAPD_CHAN_INVALID:
+	default:
+		hostapd_notify_bad_chans(iface);
+		return -3;
 	}
 
 	return 0;
@@ -756,6 +837,8 @@ const char * hostapd_hw_mode_txt(int mode)
 		return "IEEE 802.11b";
 	case HOSTAPD_MODE_IEEE80211G:
 		return "IEEE 802.11g";
+	case HOSTAPD_MODE_IEEE80211AD:
+		return "IEEE 802.11ad";
 	default:
 		return "UNKNOWN";
 	}
@@ -792,24 +875,6 @@ int hostapd_hw_get_channel(struct hostapd_data *hapd, int freq)
 			&hapd->iface->current_mode->channels[i];
 		if (ch->freq == freq)
 			return ch->chan;
-	}
-
-	return 0;
-}
-
-
-int hostapd_hw_get_channel_flag(struct hostapd_data *hapd, int chan)
-{
-	int i;
-
-	if (!hapd->iface->current_mode)
-		return 0;
-
-	for (i = 0; i < hapd->iface->current_mode->num_channels; i++) {
-		struct hostapd_channel_data *ch =
-			&hapd->iface->current_mode->channels[i];
-		if (ch->chan == chan)
-			return ch->flag;
 	}
 
 	return 0;

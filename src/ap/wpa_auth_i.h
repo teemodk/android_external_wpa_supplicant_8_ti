@@ -26,6 +26,7 @@ struct wpa_state_machine {
 	struct wpa_group *group;
 
 	u8 addr[ETH_ALEN];
+	u8 p2p_dev_addr[ETH_ALEN];
 
 	enum {
 		WPA_PTK_INITIALIZE, WPA_PTK_DISCONNECT, WPA_PTK_DISCONNECTED,
@@ -87,6 +88,7 @@ struct wpa_state_machine {
 	unsigned int ft_completed:1;
 	unsigned int pmk_r1_name_valid:1;
 #endif /* CONFIG_IEEE80211R */
+	unsigned int is_wnmsleep:1;
 
 	u8 req_replay_counter[WPA_REPLAY_COUNTER_LEN];
 	int req_replay_counter_used;

@@ -28,6 +28,7 @@
 #define WLAN_STA_ASSOC_REQ_OK BIT(15)
 #define WLAN_STA_WPS2 BIT(16)
 #define WLAN_STA_GAS BIT(17)
+#define WLAN_STA_VHT BIT(18)
 #define WLAN_STA_PENDING_DISASSOC_CB BIT(29)
 #define WLAN_STA_PENDING_DEAUTH_CB BIT(30)
 #define WLAN_STA_NONERP BIT(31)
@@ -56,13 +57,13 @@ struct sta_info {
 	unsigned int no_ht_set:1;
 	unsigned int ht_20mhz_set:1;
 	unsigned int no_p2p_set:1;
-	unsigned int priority_set:1;
 
 	u16 auth_alg;
 	u8 previous_ap[6];
 
 	enum {
-		STA_NULLFUNC = 0, STA_DISASSOC, STA_DEAUTH, STA_REMOVE
+		STA_NULLFUNC = 0, STA_DISASSOC, STA_DEAUTH, STA_REMOVE,
+		STA_DISASSOC_FROM_CLI
 	} timeout_next;
 
 	u16 deauth_reason;
@@ -95,9 +96,14 @@ struct sta_info {
 	struct hostapd_ssid *ssid_probe; /* SSID selection based on ProbeReq */
 
 	int vlan_id;
-	u8 *psk; /* PSK from RADIUS authentication server */
+	 /* PSKs from RADIUS authentication server */
+	struct hostapd_sta_wpa_psk_short *psk;
+
+	char *identity; /* User-Name from RADIUS */
+	char *radius_cui; /* Chargeable-User-Identity from RADIUS */
 
 	struct ieee80211_ht_capabilities *ht_capabilities;
+	struct ieee80211_vht_capabilities *vht_capabilities;
 
 #ifdef CONFIG_IEEE80211W
 	int sa_query_count; /* number of pending SA Query requests;
@@ -117,6 +123,13 @@ struct sta_info {
 
 	struct wpabuf *wps_ie; /* WPS IE from (Re)Association Request */
 	struct wpabuf *p2p_ie; /* P2P IE from (Re)Association Request */
+	struct wpabuf *hs20_ie; /* HS 2.0 IE from (Re)Association Request */
+
+	struct os_time connected_time;
+
+#ifdef CONFIG_SAE
+	struct sae_data *sae;
+#endif /* CONFIG_SAE */
 };
 
 
@@ -143,6 +156,7 @@ int ap_for_each_sta(struct hostapd_data *hapd,
 			      void *ctx),
 		    void *ctx);
 struct sta_info * ap_get_sta(struct hostapd_data *hapd, const u8 *sta);
+struct sta_info * ap_get_sta_p2p(struct hostapd_data *hapd, const u8 *addr);
 void ap_sta_hash_add(struct hostapd_data *hapd, struct sta_info *sta);
 void ap_free_sta(struct hostapd_data *hapd, struct sta_info *sta);
 void hostapd_free_stas(struct hostapd_data *hapd);
@@ -177,7 +191,5 @@ static inline int ap_sta_is_authorized(struct sta_info *sta)
 
 void ap_sta_deauth_cb(struct hostapd_data *hapd, struct sta_info *sta);
 void ap_sta_disassoc_cb(struct hostapd_data *hapd, struct sta_info *sta);
-void ap_sta_set_priority(struct hostapd_data *hapd, struct sta_info *sta);
-void ap_sta_cancel_priority(struct hostapd_data *hapd, struct sta_info *sta);
 
 #endif /* STA_INFO_H */

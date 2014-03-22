@@ -43,6 +43,7 @@ OBJS += ../src/ap/utils.o
 OBJS += ../src/ap/authsrv.o
 OBJS += ../src/ap/ieee802_1x.o
 OBJS += ../src/ap/ap_config.o
+OBJS += ../src/ap/eap_user_db.o
 OBJS += ../src/ap/ieee802_11_auth.o
 OBJS += ../src/ap/sta_info.o
 OBJS += ../src/ap/wpa_auth.o
@@ -123,6 +124,12 @@ ifdef CONFIG_NO_VLAN
 CFLAGS += -DCONFIG_NO_VLAN
 else
 OBJS += ../src/ap/vlan_init.o
+ifdef CONFIG_VLAN_NETLINK
+ifdef CONFIG_FULL_DYNAMIC_VLAN
+OBJS += ../src/ap/vlan_util.o
+endif
+CFLAGS += -DCONFIG_VLAN_NETLINK
+endif
 endif
 
 ifdef CONFIG_NO_CTRL_IFACE
@@ -165,12 +172,20 @@ NEED_AES_OMAC1=y
 NEED_AES_UNWRAP=y
 endif
 
-ifdef CONFIG_IEEE80211N
-CFLAGS += -DCONFIG_IEEE80211N
+ifdef CONFIG_SAE
+CFLAGS += -DCONFIG_SAE
+OBJS += ../src/common/sae.o
+NEED_ECC=y
+NEED_DH_GROUPS=y
 endif
 
 ifdef CONFIG_WNM
 CFLAGS += -DCONFIG_WNM
+OBJS += ../src/ap/wnm_ap.o
+endif
+
+ifdef CONFIG_IEEE80211N
+CFLAGS += -DCONFIG_IEEE80211N
 endif
 
 ifdef CONFIG_IEEE80211AC
@@ -210,6 +225,14 @@ ifdef CONFIG_EAP_TLS
 CFLAGS += -DEAP_SERVER_TLS
 OBJS += ../src/eap_server/eap_server_tls.o
 TLS_FUNCS=y
+endif
+
+ifdef CONFIG_EAP_UNAUTH_TLS
+CFLAGS += -DEAP_SERVER_UNAUTH_TLS
+ifndef CONFIG_EAP_TLS
+OBJS += ../src/eap_server/eap_server_tls.o
+TLS_FUNCS=y
+endif
 endif
 
 ifdef CONFIG_EAP_PEAP
@@ -300,6 +323,13 @@ OBJS += ../src/eap_server/eap_server_pwd.o ../src/eap_common/eap_pwd_common.o
 NEED_SHA256=y
 endif
 
+ifdef CONFIG_EAP_EKE
+CFLAGS += -DEAP_SERVER_EKE
+OBJS += ../src/eap_server/eap_server_eke.o ../src/eap_common/eap_eke_common.o
+NEED_DH_GROUPS=y
+NEED_DH_GROUPS_ALL=y
+endif
+
 ifdef CONFIG_EAP_VENDOR_TEST
 CFLAGS += -DEAP_SERVER_VENDOR_TEST
 OBJS += ../src/eap_server/eap_server_vendor_test.o
@@ -338,25 +368,10 @@ NEED_AES_CBC=y
 NEED_MODEXP=y
 CONFIG_EAP=y
 
-ifdef CONFIG_WPS_UFD
-CFLAGS += -DCONFIG_WPS_UFD
-OBJS += ../src/wps/wps_ufd.o
-NEED_WPS_OOB=y
-endif
-
 ifdef CONFIG_WPS_NFC
 CFLAGS += -DCONFIG_WPS_NFC
 OBJS += ../src/wps/ndef.o
-OBJS += ../src/wps/wps_nfc.o
 NEED_WPS_OOB=y
-ifdef CONFIG_WPS_NFC_PN531
-PN531_PATH ?= /usr/local/src/nfc
-CFLAGS += -DCONFIG_WPS_NFC_PN531
-CFLAGS += -I${PN531_PATH}/inc
-OBJS += ../src/wps/wps_nfc_pn531.o
-LIBS += ${PN531_PATH}/lib/wpsnfc.dll
-LIBS += ${PN531_PATH}/lib/libnfc_mapping_pn53x.dll
-endif
 endif
 
 ifdef NEED_WPS_OOB
@@ -649,14 +664,19 @@ OBJS += $(AESOBJS)
 endif
 
 ifdef NEED_SHA1
+ifneq ($(CONFIG_TLS), openssl)
 SHA1OBJS += ../src/crypto/sha1.o
+endif
+SHA1OBJS += ../src/crypto/sha1-prf.o
 ifdef CONFIG_INTERNAL_SHA1
 SHA1OBJS += ../src/crypto/sha1-internal.o
 ifdef NEED_FIPS186_2_PRF
 SHA1OBJS += ../src/crypto/fips_prf_internal.o
 endif
 endif
+ifneq ($(CONFIG_TLS), openssl)
 SHA1OBJS += ../src/crypto/sha1-pbkdf2.o
+endif
 ifdef NEED_T_PRF
 SHA1OBJS += ../src/crypto/sha1-tprf.o
 endif
@@ -696,7 +716,10 @@ endif
 
 ifdef NEED_SHA256
 CFLAGS += -DCONFIG_SHA256
+ifneq ($(CONFIG_TLS), openssl)
 OBJS += ../src/crypto/sha256.o
+endif
+OBJS += ../src/crypto/sha256-prf.o
 ifdef CONFIG_INTERNAL_SHA256
 OBJS += ../src/crypto/sha256-internal.o
 endif
@@ -715,6 +738,10 @@ ifdef CONFIG_INTERNAL_DH_GROUP5
 ifdef NEED_DH_GROUPS
 OBJS += ../src/crypto/dh_group5.o
 endif
+endif
+
+ifdef NEED_ECC
+CFLAGS += -DCONFIG_ECC
 endif
 
 ifdef CONFIG_NO_RANDOM_POOL
@@ -770,6 +797,12 @@ CFLAGS += -DCONFIG_P2P_MANAGER
 OBJS += ../src/ap/p2p_hostapd.o
 endif
 
+ifdef CONFIG_HS20
+CFLAGS += -DCONFIG_HS20
+OBJS += ../src/ap/hs20.o
+CONFIG_INTERWORKING=y
+endif
+
 ifdef CONFIG_INTERWORKING
 CFLAGS += -DCONFIG_INTERWORKING
 OBJS += ../src/common/gas.o
@@ -784,12 +817,28 @@ else
 OBJS_c += ../src/utils/edit_simple.o
 endif
 
+ifdef CONFIG_ACS
+CFLAGS += -DCONFIG_ACS
+OBJS += ../src/ap/acs.o
+LIBS += -lm
+endif
+
 ifdef CONFIG_NO_STDOUT_DEBUG
 CFLAGS += -DCONFIG_NO_STDOUT_DEBUG
 endif
 
 ifdef CONFIG_DEBUG_FILE
 CFLAGS += -DCONFIG_DEBUG_FILE
+endif
+
+ifdef CONFIG_SQLITE
+CFLAGS += -DCONFIG_SQLITE
+LIBS += -lsqlite3
+LIBS_h += -lsqlite3
+endif
+
+ifdef CONFIG_TESTING_OPTIONS
+CFLAGS += -DCONFIG_TESTING_OPTIONS
 endif
 
 ALL=hostapd hostapd_cli

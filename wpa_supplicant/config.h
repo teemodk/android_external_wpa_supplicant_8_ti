@@ -18,12 +18,13 @@
 #define DEFAULT_FAST_REAUTH 1
 #define DEFAULT_P2P_GO_INTENT 7
 #define DEFAULT_P2P_INTRA_BSS 1
-#define DEFAULT_P2P_GO_MAX_INACTIVITY (5*60)
+#define DEFAULT_P2P_GO_MAX_INACTIVITY (5 * 60)
 #define DEFAULT_BSS_MAX_COUNT 200
 #define DEFAULT_BSS_EXPIRATION_AGE 180
 #define DEFAULT_BSS_EXPIRATION_SCAN_COUNT 2
 #define DEFAULT_MAX_NUM_STA 128
 #define DEFAULT_ACCESS_NETWORK_TYPE 15
+#define DEFAULT_SCAN_CUR_FREQ 0
 #define MAX_SCHED_SCAN_INTERVAL 3600
 #define MAX_NUM_SCHED_SCAN_SHORT_INTERVALS 14
 #define DEFAULT_SCHED_SCAN_SHORT_INTERVAL 5
@@ -32,7 +33,7 @@
 
 #include "config_ssid.h"
 #include "wps/wps.h"
-#include "common/wpa_common.h"
+#include "common/ieee802_11_common.h"
 
 
 struct wpa_cred {
@@ -86,6 +87,11 @@ struct wpa_cred {
 	 * password - Password for Interworking network selection
 	 */
 	char *password;
+
+	/**
+	 * ext_password - Whether password is a name for external storage
+	 */
+	int ext_password;
 
 	/**
 	 * ca_cert - CA certificate for Interworking network selection
@@ -155,6 +161,53 @@ struct wpa_cred {
 	 * whether the AP is operated by the Home SP.
 	 */
 	char *domain;
+
+	/**
+	 * roaming_consortium - Roaming Consortium OI
+	 *
+	 * If roaming_consortium_len is non-zero, this field contains the
+	 * Roaming Consortium OI that can be used to determine which access
+	 * points support authentication with this credential. This is an
+	 * alternative to the use of the realm parameter. When using Roaming
+	 * Consortium to match the network, the EAP parameters need to be
+	 * pre-configured with the credential since the NAI Realm information
+	 * may not be available or fetched.
+	 */
+	u8 roaming_consortium[15];
+
+	/**
+	 * roaming_consortium_len - Length of roaming_consortium
+	 */
+	size_t roaming_consortium_len;
+
+	/**
+	 * eap_method - EAP method to use
+	 *
+	 * Pre-configured EAP method to use with this credential or %NULL to
+	 * indicate no EAP method is selected, i.e., the method will be
+	 * selected automatically based on ANQP information.
+	 */
+	struct eap_method_type *eap_method;
+
+	/**
+	 * phase1 - Phase 1 (outer authentication) parameters
+	 *
+	 * Pre-configured EAP parameters or %NULL.
+	 */
+	char *phase1;
+
+	/**
+	 * phase2 - Phase 2 (inner authentication) parameters
+	 *
+	 * Pre-configured EAP parameters or %NULL.
+	 */
+	char *phase2;
+
+	struct excluded_ssid {
+		u8 ssid[MAX_SSID_LEN];
+		size_t ssid_len;
+	} *excluded_ssid;
+	size_t num_excluded_ssid;
 };
 
 
@@ -172,9 +225,8 @@ struct wpa_cred {
 #define CFG_CHANGED_P2P_LISTEN_CHANNEL BIT(11)
 #define CFG_CHANGED_P2P_OPER_CHANNEL BIT(12)
 #define CFG_CHANGED_P2P_PREF_CHAN BIT(13)
-#ifdef ANDROID_P2P
-#define CFG_CHANGED_IFACE_PRIORITY BIT(14)
-#endif
+#define CFG_CHANGED_EXT_PW_BACKEND BIT(14)
+#define CFG_CHANGED_NFC_PASSWORD_TOKEN BIT(15)
 
 /**
  * struct wpa_config - wpa_supplicant configuration data
@@ -520,14 +572,15 @@ struct wpa_config {
 	int p2p_oper_reg_class;
 	int p2p_oper_channel;
 	int p2p_go_intent;
+	int override_p2p_go_intent;
 	char *p2p_ssid_postfix;
 	int persistent_reconnect;
 	int p2p_intra_bss;
 	unsigned int num_p2p_pref_chan;
 	struct p2p_channel *p2p_pref_chan;
+	int p2p_ignore_shared_freq;
 
 	struct wpabuf *wps_vendor_ext_m1;
-	struct wpa_wmm_ac_params wmm_ac_params[4];
 
 #define MAX_WPS_VENDOR_EXT 10
 	/**
@@ -599,6 +652,22 @@ struct wpa_config {
 	unsigned int max_num_sta;
 
 	/**
+	 * freq_list - Array of allowed scan frequencies or %NULL for all
+	 *
+	 * This is an optional zero-terminated array of frequencies in
+	 * megahertz (MHz) to allow for narrowing scanning range.
+	 */
+	int *freq_list;
+
+	/**
+	 * scan_cur_freq - Whether to scan only the current channel
+	 *
+	 * If true, attempt to scan only the current channel if any other
+	 * VIFs on this radio are already associated on a particular channel.
+	 */
+	int scan_cur_freq;
+
+	/**
 	 * changed_parameters - Bitmap of changed parameters since last update
 	 */
 	unsigned int changed_parameters;
@@ -662,6 +731,15 @@ struct wpa_config {
 	char *autoscan;
 
 	/**
+	 * wps_nfc_pw_from_config - NFC Device Password was read from config
+	 *
+	 * This parameter can be determined whether the NFC Device Password was
+	 * included in the configuration (1) or generated dynamically (0). Only
+	 * the former case is re-written back to the configuration file.
+	 */
+	int wps_nfc_pw_from_config;
+
+	/**
 	 * wps_nfc_dev_pw_id - NFC Device Password ID for password token
 	 */
 	int wps_nfc_dev_pw_id;
@@ -672,18 +750,24 @@ struct wpa_config {
 	struct wpabuf *wps_nfc_dh_pubkey;
 
 	/**
-	 * wps_nfc_dh_pubkey - NFC DH Private Key for password token
+	 * wps_nfc_dh_privkey - NFC DH Private Key for password token
 	 */
 	struct wpabuf *wps_nfc_dh_privkey;
 
 	/**
-	 * wps_nfc_dh_pubkey - NFC Device Password for password token
+	 * wps_nfc_dev_pw - NFC Device Password for password token
 	 */
 	struct wpabuf *wps_nfc_dev_pw;
 
-
 	/**
-	 * p2p_go_max_inactivity - Timeout in seconds to detect STA's inactivity
+	 * ext_password_backend - External password backend or %NULL if none
+	 *
+	 * format: <backend name>[:<optional backend parameters>]
+	 */
+	char *ext_password_backend;
+
+	/*
+	 * p2p_go_max_inactivity - Timeout in seconds to detect STA inactivity
 	 *
 	 * This timeout value is used in P2P GO mode to clean up
 	 * inactive stations.
@@ -691,23 +775,113 @@ struct wpa_config {
 	 */
 	int p2p_go_max_inactivity;
 
+	struct hostapd_wmm_ac_params wmm_ac_params[4];
+
+	/**
+	 * auto_interworking - Whether to use network selection automatically
+	 *
+	 * 0 = do not automatically go through Interworking network selection
+	 *     (i.e., require explicit interworking_select command for this)
+	 * 1 = perform Interworking network selection if one or more
+	 *     credentials have been configured and scan did not find a
+	 *     matching network block
+	 */
+	int auto_interworking;
+
 	/**
 	 * p2p_go_ht40 - Default mode for HT40 enable when operating as GO.
 	 *
-	 * This will take effect for p2p_group_add and p2p_connect. Note that
-	 * regulatory constraints and driver capabilities are consulted anyway,
-	 * so setting it to 1 can't do real harm
+	 * This will take effect for p2p_group_add, p2p_connect, and p2p_invite.
+	 * Note that regulatory constraints and driver capabilities are
+	 * consulted anyway, so setting it to 1 can't do real harm.
 	 * By default: 0 (disabled)
 	 */
 	int p2p_go_ht40;
 
 	/**
-	 * p2p_multi_chan - Default to multi-channel operation when operating
-	 * as p2p. We will try to optimize throughput instead of trying to make
-	 * sure P2P starts on the same channel as another interface that's
-	 * currently connected.
+	 * p2p_disabled - Whether P2P operations are disabled for this interface
 	 */
-	int p2p_multi_chan;
+	int p2p_disabled;
+
+	/**
+	 * p2p_no_group_iface - Whether group interfaces can be used
+	 *
+	 * By default, wpa_supplicant will create a separate interface for P2P
+	 * group operations if the driver supports this. This functionality can
+	 * be disabled by setting this parameter to 1. In that case, the same
+	 * interface that was used for the P2P management operations is used
+	 * also for the group operation.
+	 */
+	int p2p_no_group_iface;
+
+	/**
+	 * okc - Whether to enable opportunistic key caching by default
+	 *
+	 * By default, OKC is disabled unless enabled by the per-network
+	 * proactive_key_caching=1 parameter. okc=1 can be used to change this
+	 * default behavior.
+	 */
+	int okc;
+
+	/**
+	 * pmf - Whether to enable/require PMF by default
+	 *
+	 * By default, PMF is disabled unless enabled by the per-network
+	 * ieee80211w=1 or ieee80211w=2 parameter. pmf=1/2 can be used to change
+	 * this default behavior.
+	 */
+	enum mfp_options pmf;
+
+	/**
+	 * sae_groups - Preference list of enabled groups for SAE
+	 *
+	 * By default (if this parameter is not set), the mandatory group 19
+	 * (ECC group defined over a 256-bit prime order field) is preferred,
+	 * but other groups are also enabled. If this parameter is set, the
+	 * groups will be tried in the indicated order.
+	 */
+	int *sae_groups;
+
+	/**
+	 * dtim_period - Default DTIM period in Beacon intervals
+	 *
+	 * This parameter can be used to set the default value for network
+	 * blocks that do not specify dtim_period.
+	 */
+	int dtim_period;
+
+	/**
+	 * beacon_int - Default Beacon interval in TU
+	 *
+	 * This parameter can be used to set the default value for network
+	 * blocks that do not specify beacon_int.
+	 */
+	int beacon_int;
+
+	/**
+	 * ap_vendor_elements: Vendor specific elements for Beacon/ProbeResp
+	 *
+	 * This parameter can be used to define additional vendor specific
+	 * elements for Beacon and Probe Response frames in AP/P2P GO mode. The
+	 * format for these element(s) is a hexdump of the raw information
+	 * elements (id+len+payload for one or more elements).
+	 */
+	struct wpabuf *ap_vendor_elements;
+
+	/**
+	 * ignore_old_scan_res - Ignore scan results older than request
+	 *
+	 * The driver may have a cache of scan results that makes it return
+	 * information that is older than our scan trigger. This parameter can
+	 * be used to configure such old information to be ignored instead of
+	 * allowing it to update the internal BSS table.
+	 */
+	int ignore_old_scan_res;
+
+	/**
+	 * sched_scan_interval -  schedule scan interval
+	 */
+	unsigned int sched_scan_interval;
 
 	/**
 	 * sched_scan_short_interval - Initial interval for sched scan in secs
@@ -726,27 +900,6 @@ struct wpa_config {
 	 * sched_scan_num_short_intervals - see sched_scan_short_interval
 	 */
 	int sched_scan_num_short_intervals;
-
-#ifdef ANDROID_P2P
-	/**
-	 * prioritize - Prioritize an Interface
-	 * Interface name of the interface that needs to be proritized; Useful
-	 * for resolving conflicts in connection. up to 16 octets encoded in
-	 * UTF-8
-	 */
-	char *prioritize;
-
-	/*
-	 * 0 - support STA + P2P CL/GO on the same channel (BRCM default)
-	 * 1 - support only one connection at a time (WL8)
-	 * 2 - support STA + P2P GO on same channel, but not P2P CL (WL6/7)
-	 */
-	int p2p_conc_mode;
-#endif
-	/*
-	 * p2p_disabled - Whether P2P operations are disabled for this interface
-	 */
-	int p2p_disabled;
 
 	/*
 	 * concurrent_sched_scan - sched scan can run concurrently with normal
@@ -811,6 +964,7 @@ int wpa_config_process_global(struct wpa_config *config, char *pos, int line);
  * wpa_config_read - Read and parse configuration database
  * @name: Name of the configuration (e.g., path and file name for the
  * configuration file)
+ * @cfgp: Pointer to previously allocated configuration data or %NULL if none
  * Returns: Pointer to allocated configuration data or %NULL on failure
  *
  * This function reads configuration data, parses its contents, and allocates
@@ -819,7 +973,7 @@ int wpa_config_process_global(struct wpa_config *config, char *pos, int line);
  *
  * Each configuration backend needs to implement this function.
  */
-struct wpa_config * wpa_config_read(const char *name);
+struct wpa_config * wpa_config_read(const char *name, struct wpa_config *cfgp);
 
 /**
  * wpa_config_write - Write or update configuration data

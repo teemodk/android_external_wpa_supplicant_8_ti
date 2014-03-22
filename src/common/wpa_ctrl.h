@@ -44,10 +44,16 @@ extern "C" {
 #define WPA_EVENT_EAP_PEER_CERT "CTRL-EVENT-EAP-PEER-CERT "
 /** EAP TLS certificate chain validation error */
 #define WPA_EVENT_EAP_TLS_CERT_ERROR "CTRL-EVENT-EAP-TLS-CERT-ERROR "
+/** EAP status */
+#define WPA_EVENT_EAP_STATUS "CTRL-EVENT-EAP-STATUS "
 /** EAP authentication completed successfully */
 #define WPA_EVENT_EAP_SUCCESS "CTRL-EVENT-EAP-SUCCESS "
 /** EAP authentication failed (EAP-Failure received) */
 #define WPA_EVENT_EAP_FAILURE "CTRL-EVENT-EAP-FAILURE "
+/** Network block temporarily disabled (e.g., due to authentication failure) */
+#define WPA_EVENT_TEMP_DISABLED "CTRL-EVENT-SSID-TEMP-DISABLED "
+/** Temporarily disabled network block re-enabled */
+#define WPA_EVENT_REENABLED "CTRL-EVENT-SSID-REENABLED "
 /** New scan results available */
 #define WPA_EVENT_SCAN_RESULTS "CTRL-EVENT-SCAN-RESULTS "
 /** wpa_supplicant state change */
@@ -56,10 +62,9 @@ extern "C" {
 #define WPA_EVENT_BSS_ADDED "CTRL-EVENT-BSS-ADDED "
 /** A BSS entry was removed (followed by BSS entry id and BSSID) */
 #define WPA_EVENT_BSS_REMOVED "CTRL-EVENT-BSS-REMOVED "
-#ifdef ANDROID_P2P
-/** Notify the Userspace about the freq conflict */
-#define WPA_EVENT_FREQ_CONFLICT "CTRL-EVENT-FREQ-CONFLICT "
-#endif
+
+/** RSN IBSS 4-way handshakes completed with specified peer */
+#define IBSS_RSN_COMPLETED "IBSS-RSN-COMPLETED "
 
 /** WPS overlap detected in PBC mode */
 #define WPS_EVENT_OVERLAP "WPS-OVERLAP-DETECTED "
@@ -82,6 +87,10 @@ extern "C" {
 #define WPS_EVENT_SUCCESS "WPS-SUCCESS "
 /** WPS enrollment attempt timed out and was terminated */
 #define WPS_EVENT_TIMEOUT "WPS-TIMEOUT "
+/* PBC mode was activated */
+#define WPS_EVENT_ACTIVE "WPS-PBC-ACTIVE "
+/* PBC mode was disabled */
+#define WPS_EVENT_DISABLE "WPS-PBC-DISABLE "
 
 #define WPS_EVENT_ENROLLEE_SEEN "WPS-ENROLLEE-SEEN "
 
@@ -129,9 +138,15 @@ extern "C" {
 #define P2P_EVENT_INVITATION_RECEIVED "P2P-INVITATION-RECEIVED "
 #define P2P_EVENT_INVITATION_RESULT "P2P-INVITATION-RESULT "
 #define P2P_EVENT_FIND_STOPPED "P2P-FIND-STOPPED "
+#define P2P_EVENT_PERSISTENT_PSK_FAIL "P2P-PERSISTENT-PSK-FAIL id="
+
+/* parameters: <PMF enabled> <timeout in ms> <Session Information URL> */
+#define ESS_DISASSOC_IMMINENT "ESS-DISASSOC-IMMINENT "
 
 #define INTERWORKING_AP "INTERWORKING-AP "
 #define INTERWORKING_NO_MATCH "INTERWORKING-NO-MATCH "
+
+#define GAS_RESPONSE_INFO "GAS-RESPONSE-INFO "
 
 /* hostapd control interface - fixed message prefixes */
 #define WPS_EVENT_PIN_NEEDED "WPS-PIN-NEEDED "
@@ -144,10 +159,16 @@ extern "C" {
 #define AP_STA_CONNECTED "AP-STA-CONNECTED "
 #define AP_STA_DISCONNECTED "AP-STA-DISCONNECTED "
 
+#define AP_REJECTED_MAX_STA "AP-REJECTED-MAX-STA "
+#define AP_REJECTED_BLOCKED_STA "AP-REJECTED-BLOCKED-STA "
+
+/* smart config events */
+#define SMART_CONFIG_EVENT_SYNCED "SMART-CONFIG-SYNC-COMPLETE "
+#define SMART_CONFIG_EVENT_DECODED "SMART-CONFIG-SUCCESS "
 
 /* BSS command information masks */
 
-#define WPA_BSS_MASK_ALL		0xFFFFFFFF
+#define WPA_BSS_MASK_ALL		0xFFFDFFFF
 #define WPA_BSS_MASK_ID			BIT(0)
 #define WPA_BSS_MASK_BSSID		BIT(1)
 #define WPA_BSS_MASK_FREQ		BIT(2)
@@ -165,6 +186,7 @@ extern "C" {
 #define WPA_BSS_MASK_P2P_SCAN		BIT(14)
 #define WPA_BSS_MASK_INTERNETW		BIT(15)
 #define WPA_BSS_MASK_WIFI_DISPLAY	BIT(16)
+#define WPA_BSS_MASK_DELIM		BIT(17)
 
 
 /* wpa_supplicant/hostapd control interface access */
@@ -291,6 +313,8 @@ int wpa_ctrl_pending(struct wpa_ctrl *ctrl);
  */
 int wpa_ctrl_get_fd(struct wpa_ctrl *ctrl);
 
+char * wpa_ctrl_get_remote_ifname(struct wpa_ctrl *ctrl);
+
 #ifdef ANDROID
 /**
  * wpa_ctrl_cleanup() - Delete any local UNIX domain socket files that
@@ -303,8 +327,11 @@ void wpa_ctrl_cleanup(void);
 #endif /* ANDROID */
 
 #ifdef CONFIG_CTRL_IFACE_UDP
+/* Port range for multiple wpa_supplicant instances and multiple VIFs */
 #define WPA_CTRL_IFACE_PORT 9877
+#define WPA_CTRL_IFACE_PORT_LIMIT 50 /* decremented from start */
 #define WPA_GLOBAL_CTRL_IFACE_PORT 9878
+#define WPA_GLOBAL_CTRL_IFACE_PORT_LIMIT 20 /* incremented from start */
 #endif /* CONFIG_CTRL_IFACE_UDP */
 
 

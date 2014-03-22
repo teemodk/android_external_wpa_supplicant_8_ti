@@ -304,7 +304,9 @@ static void eap_mschapv2_password_changed(struct eap_sm *sm,
 			"EAP-MSCHAPV2: Password changed successfully");
 		data->prev_error = 0;
 		os_free(config->password);
-		if (config->flags & EAP_CONFIG_FLAGS_PASSWORD_NTHASH) {
+		if (config->flags & EAP_CONFIG_FLAGS_EXT_PASSWORD) {
+			/* TODO: update external storage */
+		} else if (config->flags & EAP_CONFIG_FLAGS_PASSWORD_NTHASH) {
 			config->password = os_malloc(16);
 			config->password_len = 16;
 			if (config->password) {
@@ -642,10 +644,8 @@ static struct wpabuf * eap_mschapv2_failure(struct eap_sm *sm,
 	 * must allocate a large enough temporary buffer to create that since
 	 * the received message does not include nul termination.
 	 */
-	buf = os_malloc(len + 1);
+	buf = dup_binstr(msdata, len);
 	if (buf) {
-		os_memcpy(buf, msdata, len);
-		buf[len] = '\0';
 		retry = eap_mschapv2_failure_txt(sm, data, buf);
 		os_free(buf);
 	}

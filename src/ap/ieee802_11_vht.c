@@ -38,7 +38,7 @@ u8 * hostapd_eid_vht_capabilities(struct hostapd_data *hapd, u8 *eid)
 		hapd->iface->current_mode->vht_capab);
 
 	/* Supported MCS set comes from hw */
-	os_memcpy(cap->vht_supported_mcs_set,
+	os_memcpy(&cap->vht_supported_mcs_set,
 	          hapd->iface->current_mode->vht_mcs_set, 8);
 
 	pos += sizeof(*cap);
@@ -61,12 +61,61 @@ u8 * hostapd_eid_vht_operation(struct hostapd_data *hapd, u8 *eid)
 	oper = (struct ieee80211_vht_operation *) pos;
 	os_memset(oper, 0, sizeof(*oper));
 
+	/*
+	 * center freq = 5 GHz + (5 * index)
+	 * So index 42 gives center freq 5.210 GHz
+	 * which is channel 42 in 5G band
+	 */
+	oper->vht_op_info_chan_center_freq_seg0_idx =
+		hapd->iconf->vht_oper_centr_freq_seg0_idx;
+	oper->vht_op_info_chan_center_freq_seg1_idx =
+		hapd->iconf->vht_oper_centr_freq_seg1_idx;
+
 	oper->vht_op_info_chwidth = hapd->iconf->vht_oper_chwidth;
 
 	/* VHT Basic MCS set comes from hw */
 	/* Hard code 1 stream, MCS0-7 is a min Basic VHT MCS rates */
-	oper->vht_basic_mcs_set = 0xfffc;
+	oper->vht_basic_mcs_set = host_to_le16(0xfffc);
 	pos += sizeof(*oper);
 
 	return pos;
+}
+
+
+u16 copy_sta_vht_capab(struct hostapd_data *hapd, struct sta_info *sta,
+		       const u8 *vht_capab, size_t vht_capab_len)
+{
+	/* Disable VHT caps for STAs associated to no-VHT BSSes. */
+	if (!vht_capab ||
+	    vht_capab_len < sizeof(struct ieee80211_vht_capabilities) ||
+	    hapd->conf->disable_11ac) {
+		sta->flags &= ~WLAN_STA_VHT;
+		os_free(sta->vht_capabilities);
+		sta->vht_capabilities = NULL;
+		return WLAN_STATUS_SUCCESS;
+	}
+
+	if (sta->vht_capabilities == NULL) {
+		sta->vht_capabilities =
+			os_zalloc(sizeof(struct ieee80211_vht_capabilities));
+		if (sta->vht_capabilities == NULL)
+			return WLAN_STATUS_UNSPECIFIED_FAILURE;
+	}
+
+	sta->flags |= WLAN_STA_VHT;
+	os_memcpy(sta->vht_capabilities, vht_capab,
+		  sizeof(struct ieee80211_vht_capabilities));
+
+	return WLAN_STATUS_SUCCESS;
+}
+
+void hostapd_get_vht_capab(struct hostapd_data *hapd,
+			   struct ieee80211_vht_capabilities *vht_cap,
+			   struct ieee80211_vht_capabilities *neg_vht_cap)
+{
+	if (vht_cap == NULL)
+		return;
+	os_memcpy(neg_vht_cap, vht_cap, sizeof(*neg_vht_cap));
+
+	/* TODO: mask own capabilities, like get_ht_capab() */
 }

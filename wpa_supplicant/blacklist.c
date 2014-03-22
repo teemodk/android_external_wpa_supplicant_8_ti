@@ -24,6 +24,9 @@ struct wpa_blacklist * wpa_blacklist_get(struct wpa_supplicant *wpa_s,
 {
 	struct wpa_blacklist *e;
 
+	if (wpa_s == NULL || bssid == NULL)
+		return NULL;
+
 	e = wpa_s->blacklist;
 	while (e) {
 		if (os_memcmp(e->bssid, bssid, ETH_ALEN) == 0)
@@ -98,6 +101,9 @@ int wpa_blacklist_add(struct wpa_supplicant *wpa_s, const u8 *bssid)
 {
 	struct wpa_blacklist *e;
 
+	if (wpa_s == NULL || bssid == NULL)
+		return -1;
+
 	e = wpa_blacklist_get(wpa_s, bssid);
 	if (e) {
 		e->count++;
@@ -136,6 +142,9 @@ int wpa_blacklist_del(struct wpa_supplicant *wpa_s, const u8 *bssid)
 {
 	struct wpa_blacklist *e, *prev = NULL;
 
+	if (wpa_s == NULL || bssid == NULL)
+		return -1;
+
 	e = wpa_s->blacklist;
 	while (e) {
 		if (os_memcmp(e->bssid, bssid, ETH_ALEN) == 0) {
@@ -165,15 +174,21 @@ int wpa_blacklist_del(struct wpa_supplicant *wpa_s, const u8 *bssid)
 void wpa_blacklist_clear(struct wpa_supplicant *wpa_s)
 {
 	struct wpa_blacklist *e, *prev;
+	int max_count = 0;
 
 	e = wpa_s->blacklist;
 	wpa_s->blacklist = NULL;
 	while (e) {
+		if (e->count > max_count)
+			max_count = e->count;
 		prev = e;
 		e = e->next;
 		wpa_printf(MSG_DEBUG, "Removed BSSID " MACSTR " from "
 			   "blacklist (clear)", MAC2STR(prev->bssid));
 		os_free(prev);
 	}
+
+	wpa_s->extra_blacklist_count += max_count;
+
 	eloop_cancel_timeout(blacklist_timeout, wpa_s, NULL);
 }

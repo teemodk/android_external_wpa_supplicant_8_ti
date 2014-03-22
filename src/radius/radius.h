@@ -18,7 +18,7 @@
 struct radius_hdr {
 	u8 code;
 	u8 identifier;
-	u16 length; /* including this header */
+	be16 length; /* including this header */
 	u8 authenticator[16];
 	/* followed by length-20 octets of attributes */
 } STRUCT_PACKED;
@@ -213,7 +213,7 @@ struct radius_attr_hdr * radius_msg_add_attr(struct radius_msg *msg, u8 type,
 struct radius_msg * radius_msg_parse(const u8 *data, size_t len);
 int radius_msg_add_eap(struct radius_msg *msg, const u8 *data,
 		       size_t data_len);
-u8 *radius_msg_get_eap(struct radius_msg *msg, size_t *len);
+struct wpabuf * radius_msg_get_eap(struct radius_msg *msg);
 int radius_msg_verify(struct radius_msg *msg, const u8 *secret,
 		      size_t secret_len, struct radius_msg *sent_msg,
 		      int auth);
@@ -242,7 +242,7 @@ int radius_msg_get_attr(struct radius_msg *msg, u8 type, u8 *buf, size_t len);
 int radius_msg_get_vlanid(struct radius_msg *msg);
 char * radius_msg_get_tunnel_password(struct radius_msg *msg, int *keylen,
 				      const u8 *secret, size_t secret_len,
-				      struct radius_msg *sent_msg);
+				      struct radius_msg *sent_msg, size_t n);
 
 static inline int radius_msg_add_attr_int32(struct radius_msg *msg, u8 type,
 					    u32 value)
